@@ -448,8 +448,7 @@ PUSH REGUL_CLK
 
     IF (REGULATION = 1)
     {
-        REGUL_ACTIVE = 1;
-        CalculateConsigne();
+        CalculateConsigne(); // REGUL_ACTIVE fixé par CalculateConsigne() selon les plages actives
     }
     ELSE
     {
