@@ -213,8 +213,6 @@ FUNCTION CalculateConsigne()
     }
 
     // Appliquer la régulation globale
-    REGUL_FB = REGULATION;
-
     IF (REGULATION = 0)
     {
         regulActiveTemp = 0;
