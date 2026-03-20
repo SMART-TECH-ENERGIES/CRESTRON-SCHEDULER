@@ -603,6 +603,7 @@ PUSH CHECK_SCHEDULE_PULSE
 *******************************************************************************************/
 PUSH DEMARRAGE_TRIG
 {
+    File_Read();
     CalculateConsigne();
     UpdateAllFeedbacks();
 }
@@ -663,9 +664,7 @@ Function Main()
     TRACE("Nom du fichier: %s", Nom);
     TRACE("IMPORTANT: Connecter un OSCILLATOR de 1 minute à CHECK_SCHEDULE_PULSE");
 
-    // Chargement de la configuration
-    File_Read();
-
     // Pas de boucle WHILE - tout est géré par événements!
+    // Le chargement de la configuration est déclenché par DEMARRAGE_TRIG
     // L'OSCILLATOR déclenche CHECK_SCHEDULE_PULSE toutes les minutes
 }
