@@ -380,7 +380,12 @@ FUNCTION File_Read()
             JOURS[6][i] = ATOI(REMOVE(",", line));
             JOURS[7][i] = ATOI(REMOVE(",", line));
             TEMP[i] = ValidateTemperature(ATOI(REMOVE(",", line)));
-            REGULATION = ATOI(REMOVE(",", line));
+            // REGULATION est une variable globale : ne la lire qu'à la première ligne
+            // pour éviter qu'une ligne corrompue en fin de fichier l'écrase
+            IF (i = 1)
+                REGULATION = ATOI(REMOVE(",", line));
+            ELSE
+                REMOVE(",", line); // Consommer le champ sans l'appliquer
             PLAGE_ACTIF[i] = ATOI(REMOVE(",", line));
 
             i = i + 1;
