@@ -1,0 +1,657 @@
+/*******************************************************************************************
+  SIMPL+ Module Information
+  Scheduler avec Régulation de Température - Version 2.1 (OSCILLATOR)
+*******************************************************************************************/
+/*
+Dealer Name:
+System Name:
+System Number:
+Programmer:
+Comments: Scheduler hebdomadaire avec régulation de température
+          Version avec OSCILLATOR externe (meilleure pratique SIMPL+)
+
+IMPORTANT: Connecter un OSCILLATOR 1 minute dans SIMPL Windows à CHECK_SCHEDULE_PULSE
+*/
+/*******************************************************************************************
+  Compiler Directives
+*******************************************************************************************/
+#CATEGORY "46" "UNIVERSAL COMPLET"
+#DEFAULT_NONVOLATILE
+#ENABLE_STACK_CHECKING
+#ENABLE_TRACE
+/*******************************************************************************************
+  Constants
+*******************************************************************************************/
+#DEFINE_CONSTANT FILESIZE                   1000
+#DEFINE_CONSTANT TAILLE                     5
+// Limites de température (en 1/10ème de degré)
+#DEFINE_CONSTANT TEMP_MIN                   160     // 16.0°C
+#DEFINE_CONSTANT TEMP_MAX                   290     // 29.0°C
+#DEFINE_CONSTANT TEMP_INCREMENT             5       // 0.5°C
+// Jours de la semaine
+#DEFINE_CONSTANT LUNDI                      1
+#DEFINE_CONSTANT MARDI                      2
+#DEFINE_CONSTANT MERCREDI                   3
+#DEFINE_CONSTANT JEUDI                      4
+#DEFINE_CONSTANT VENDREDI                   5
+#DEFINE_CONSTANT SAMEDI                     6
+#DEFINE_CONSTANT DIMANCHE                   7
+/*******************************************************************************************
+  DIGITAL, ANALOG and SERIAL INPUTS and OUTPUTS
+*******************************************************************************************/
+DIGITAL_INPUT   ENABLE,
+                _SKIP_,
+                CHECK_SCHEDULE_PULSE,        // ← CONNECTER UN OSCILLATOR 1 MINUTE ICI
+                _SKIP_,
+                WRITE_FILE,
+                READ_FILE,
+                _SKIP_,
+                INIT,
+                DEMARRAGE_TRIG,
+                _SKIP_,
+                REGUL_CLK,
+                REGUL_SET,
+                REGUL_RESET,
+                _SKIP_,
+                LUNDI_CLK[TAILLE],
+                MARDI_CLK[TAILLE],
+                MERCREDI_CLK[TAILLE],
+                JEUDI_CLK[TAILLE],
+                VENDREDI_CLK[TAILLE],
+                SAMEDI_CLK[TAILLE],
+                DIMANCHE_CLK[TAILLE],
+                _SKIP_,
+                HOUR_PLUS[TAILLE],
+                HOUR_MINUS[TAILLE],
+                _SKIP_,
+                MINUTE_PLUS[TAILLE],
+                MINUTE_MINUS[TAILLE],
+                _SKIP_,
+                PLUS_TEMP[TAILLE],
+                MOINS_TEMP[TAILLE],
+                _SKIP_,
+                PLAGE_ENABLE[TAILLE];
+ANALOG_INPUT    _SKIP_,
+                HOUR[TAILLE],
+                _SKIP_,
+                MINUTE[TAILLE];
+DIGITAL_OUTPUT  Disk_Activity_FB,
+                _SKIP_,
+                REGUL_FB,
+                _SKIP_,
+                REGUL_ACTIVE,
+                _SKIP_,
+                LUNDI_FB[TAILLE],
+                MARDI_FB[TAILLE],
+                MERCREDI_FB[TAILLE],
+                JEUDI_FB[TAILLE],
+                VENDREDI_FB[TAILLE],
+                SAMEDI_FB[TAILLE],
+                DIMANCHE_FB[TAILLE],
+                _SKIP_,
+                LAUCH_EVENT[TAILLE],
+                _SKIP_,
+                PLAGE_FB[TAILLE];
+
+ANALOG_OUTPUT   CONSIGNE,
+                _SKIP_,
+                TEMP_EVENT[TAILLE],
+                _SKIP_,
+                EVENT_HOUR_FB[TAILLE],
+                _SKIP_,
+                EVENT_MINUTE_FB[TAILLE];
+/*******************************************************************************************
+  Parameters
+*******************************************************************************************/
+STRING_PARAMETER _SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,
+                 _SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,
+                 _SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,
+                 _SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,
+                 _SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,
+                 _SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,
+                 _SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,
+                 _SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,
+                 _SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,_SKIP_,
+                 NOM_FICHIER[50];
+/*******************************************************************************************
+  Global Variables
+*******************************************************************************************/
+INTEGER     JOURS[7][TAILLE];
+INTEGER     PLAGE_ACTIF[TAILLE];
+INTEGER     TEMP[TAILLE];
+INTEGER     REGULATION;
+INTEGER     ACTIF;
+INTEGER     LAST_CHECKED_MINUTE;
+SIGNED_INTEGER EVENT_HOUR[TAILLE];
+SIGNED_INTEGER EVENT_MINUTE[TAILLE];
+STRING      Nom[50];
+/*******************************************************************************************
+  Helper Functions
+*******************************************************************************************/
+// Normalise le jour de la semaine (0=Dimanche devient 7)
+INTEGER_FUNCTION GetNormalizedDayOfWeek()
+{
+    INTEGER jour;
+    jour = GetDayOfWeekNum();
+    IF (jour = 0)
+        jour = 7;
+    RETURN(jour);
+}
+// Validation de température
+INTEGER_FUNCTION ValidateTemperature(INTEGER temp)
+{
+    IF (temp < TEMP_MIN)
+        RETURN(TEMP_MIN);
+    ELSE IF (temp > TEMP_MAX)
+        RETURN(TEMP_MAX);
+    ELSE
+        RETURN(temp);
+}
+// Met à jour tous les feedbacks pour une plage donnée
+FUNCTION UpdatePlageFeedbacks(INTEGER plageIndex)
+{
+    IF (plageIndex < 1 || plageIndex > TAILLE)
+        RETURN;
+
+    LUNDI_FB[plageIndex] = JOURS[LUNDI][plageIndex];
+    MARDI_FB[plageIndex] = JOURS[MARDI][plageIndex];
+    MERCREDI_FB[plageIndex] = JOURS[MERCREDI][plageIndex];
+    JEUDI_FB[plageIndex] = JOURS[JEUDI][plageIndex];
+    VENDREDI_FB[plageIndex] = JOURS[VENDREDI][plageIndex];
+    SAMEDI_FB[plageIndex] = JOURS[SAMEDI][plageIndex];
+    DIMANCHE_FB[plageIndex] = JOURS[DIMANCHE][plageIndex];
+    TEMP_EVENT[plageIndex] = TEMP[plageIndex];
+    EVENT_HOUR_FB[plageIndex] = EVENT_HOUR[plageIndex];
+    EVENT_MINUTE_FB[plageIndex] = EVENT_MINUTE[plageIndex];
+    PLAGE_FB[plageIndex] = PLAGE_ACTIF[plageIndex];
+}
+// Met à jour tous les feedbacks
+FUNCTION UpdateAllFeedbacks()
+{
+    INTEGER i;
+    FOR (i = 1 TO TAILLE)
+    {
+        UpdatePlageFeedbacks(i);
+    }
+    REGUL_FB = REGULATION;
+}
+/*******************************************************************************************
+  Calcul de la Consigne - Fonction Principale
+*******************************************************************************************/
+FUNCTION CalculateConsigne()
+{
+    INTEGER dayOfWeek, currentTimeMinutes, i;
+    INTEGER consigneTemp, regulActiveTemp;
+    SIGNED_INTEGER eventTime, bestTime;
+
+    dayOfWeek = GetNormalizedDayOfWeek();
+    currentTimeMinutes = GetHourNum() * 60 + GetMinutesNum();
+    consigneTemp = 0;
+    regulActiveTemp = 0;
+    bestTime = -1;  // Aucune plage sélectionnée
+
+    // Parcourir toutes les plages actives pour trouver
+    // la plus récente dont l'heure est passée (max chronologique)
+    FOR (i = 1 TO TAILLE)
+    {
+        IF (PLAGE_ACTIF[i] = 1)
+        {
+            // Vérifier si c'est le bon jour
+            IF (JOURS[dayOfWeek][i] = 1)
+            {
+                eventTime = EVENT_HOUR[i] * 60 + EVENT_MINUTE[i];
+
+                // Retenir la plage passée la plus proche dans le temps
+                IF (currentTimeMinutes >= eventTime && eventTime > bestTime)
+                {
+                    bestTime = eventTime;
+                    consigneTemp = TEMP[i];
+                    regulActiveTemp = 1;
+                }
+            }
+        }
+    }
+
+    // Appliquer la régulation globale
+    REGUL_FB = REGULATION;
+
+    IF (REGULATION = 0)
+    {
+        regulActiveTemp = 0;
+    }
+
+    // Mettre à jour les sorties
+    IF (regulActiveTemp > 0)
+    {
+        REGUL_ACTIVE = 1;
+        CONSIGNE = consigneTemp;
+    }
+    ELSE
+    {
+        REGUL_ACTIVE = 0;
+        CONSIGNE = 0;
+    }
+}
+/*******************************************************************************************
+  Vérification du Schedule - Appelée par OSCILLATOR
+*******************************************************************************************/
+FUNCTION CheckSchedule()
+{
+    INTEGER currentTimeMinutes, dayOfWeek, i;
+    INTEGER currentMinute;
+
+    // Ne vérifier qu'une fois par minute pour éviter les déclenchements multiples
+    currentMinute = GetMinutesNum();
+    IF (currentMinute = LAST_CHECKED_MINUTE)
+        RETURN;
+
+    LAST_CHECKED_MINUTE = currentMinute;
+
+    IF (ACTIF = 0 || REGULATION = 0)
+        RETURN;
+
+    dayOfWeek = GetNormalizedDayOfWeek();
+    currentTimeMinutes = GetHourNum() * 60 + GetMinutesNum();
+
+    // Vérifier chaque plage horaire
+    FOR (i = 1 TO TAILLE)
+    {
+        IF (PLAGE_ACTIF[i] = 1)
+        {
+            // Vérifier si c'est l'heure exacte d'un événement
+            IF (currentTimeMinutes = (EVENT_HOUR[i] * 60 + EVENT_MINUTE[i]))
+            {
+                // Vérifier si c'est le bon jour
+                IF (JOURS[dayOfWeek][i] = 1)
+                {
+                    TRACE("Déclenchement événement %d - Heure: %02d:%02d - Temp: %d",
+                          i, EVENT_HOUR[i], EVENT_MINUTE[i], TEMP[i]);
+                    PULSE(20, LAUCH_EVENT[i]);
+                    CONSIGNE = TEMP[i];
+                }
+            }
+        }
+    }
+}
+/*******************************************************************************************
+  File Operations
+*******************************************************************************************/
+FUNCTION File_Write()
+{
+    SIGNED_INTEGER nFileHandle;
+    INTEGER i;
+    STRING Nom_Fichier[60];
+    STRING fileContent[FILESIZE];
+    Disk_Activity_FB = 1;
+    Nom_Fichier = "\\mmc\\SCHEDULER_" + Nom + ".csv";
+    TRACE("Ecriture fichier: %s", Nom_Fichier);
+    // Construction du contenu CSV
+    fileContent = "";
+    FOR (i = 1 TO TAILLE)
+    {
+        fileContent = fileContent +
+                      ItoA(EVENT_HOUR[i]) + "," +
+                      ItoA(EVENT_MINUTE[i]) + "," +
+                      ItoA(JOURS[1][i]) + "," +
+                      ItoA(JOURS[2][i]) + "," +
+                      ItoA(JOURS[3][i]) + "," +
+                      ItoA(JOURS[4][i]) + "," +
+                      ItoA(JOURS[5][i]) + "," +
+                      ItoA(JOURS[6][i]) + "," +
+                      ItoA(JOURS[7][i]) + "," +
+                      ItoA(TEMP[i]) + "," +
+                      ItoA(REGULATION) + "," +
+                      ItoA(PLAGE_ACTIF[i]) + "\n";
+    }
+    // Écriture du fichier
+    StartFileOperations();
+    nFileHandle = FileOpen(Nom_Fichier, _O_WRONLY | _O_CREAT | _O_TEXT | _O_TRUNC);
+
+    IF (nFileHandle >= 0)
+    {
+        IF (FileWrite(nFileHandle, fileContent, LEN(fileContent)) > 0)
+        {
+            TRACE("Fichier écrit avec succès");
+        }
+        ELSE
+        {
+            TRACE("Erreur d'écriture du fichier");
+        }
+
+        IF (FileClose(nFileHandle) <> 0)
+        {
+            TRACE("Erreur de fermeture du fichier");
+        }
+    }
+    ELSE
+    {
+        TRACE("Erreur d'ouverture du fichier: %d", nFileHandle);
+    }
+    EndFileOperations();
+    Disk_Activity_FB = 0;
+    CalculateConsigne();
+}
+FUNCTION File_Read()
+{
+    SIGNED_INTEGER nFileHandle;
+    INTEGER i;
+    STRING Nom_Fichier[60];
+    STRING fileContent[FILESIZE];
+    STRING line[100];
+    Disk_Activity_FB = 1;
+    Nom_Fichier = "\\mmc\\SCHEDULER_" + Nom + ".csv";
+    TRACE("Lecture fichier: %s", Nom_Fichier);
+    // Lecture du fichier
+    StartFileOperations();
+    nFileHandle = FileOpen(Nom_Fichier, _O_RDONLY | _O_TEXT);
+
+    IF (nFileHandle >= 0)
+    {
+        WHILE (FileEOF(nFileHandle) < 1)
+        {
+            FileRead(nFileHandle, fileContent, FILESIZE);
+        }
+
+        IF (FileClose(nFileHandle) <> 0)
+        {
+            TRACE("Erreur de fermeture du fichier");
+        }
+
+        // Traitement du contenu
+        i = 1;
+        WHILE (FIND("\n", fileContent) > 0 && i <= TAILLE)
+        {
+            line = REMOVE("\n", fileContent);
+            EVENT_HOUR[i] = ATOI(REMOVE(",", line));
+            EVENT_MINUTE[i] = ATOI(REMOVE(",", line));
+            JOURS[1][i] = ATOI(REMOVE(",", line));
+            JOURS[2][i] = ATOI(REMOVE(",", line));
+            JOURS[3][i] = ATOI(REMOVE(",", line));
+            JOURS[4][i] = ATOI(REMOVE(",", line));
+            JOURS[5][i] = ATOI(REMOVE(",", line));
+            JOURS[6][i] = ATOI(REMOVE(",", line));
+            JOURS[7][i] = ATOI(REMOVE(",", line));
+            TEMP[i] = ValidateTemperature(ATOI(REMOVE(",", line)));
+            REGULATION = ATOI(REMOVE(",", line));
+            PLAGE_ACTIF[i] = ATOI(REMOVE(",", line));
+
+            i = i + 1;
+        }
+
+        TRACE("Fichier lu avec succès - %d plages chargées", i - 1);
+    }
+    ELSE
+    {
+        TRACE("Erreur d'ouverture du fichier: %d", nFileHandle);
+    }
+    EndFileOperations();
+    Disk_Activity_FB = 0;
+    UpdateAllFeedbacks();
+}
+/*******************************************************************************************
+  Event Handlers - Contrôle de Plage
+*******************************************************************************************/
+PUSH PLAGE_ENABLE
+{
+    INTEGER index;
+    index = GetLastModifiedArrayIndex();
+
+    PLAGE_ACTIF[index] = 1 - PLAGE_ACTIF[index]; // Toggle
+    PLAGE_FB[index] = PLAGE_ACTIF[index];
+
+    //TRACE("Plage %d %s", index, PLAGE_ACTIF[index] ? "activée" : "désactivée");
+}
+/*******************************************************************************************
+  Event Handlers - Température
+*******************************************************************************************/
+PUSH PLUS_TEMP
+{
+    INTEGER index;
+    index = GetLastModifiedArrayIndex();
+
+    IF (TEMP[index] = 0)
+        TEMP[index] = TEMP_MIN;
+    ELSE
+        TEMP[index] = ValidateTemperature(TEMP[index] + TEMP_INCREMENT);
+
+    TEMP_EVENT[index] = TEMP[index];
+}
+PUSH MOINS_TEMP
+{
+    INTEGER index;
+    index = GetLastModifiedArrayIndex();
+
+    TEMP[index] = ValidateTemperature(TEMP[index] - TEMP_INCREMENT);
+    TEMP_EVENT[index] = TEMP[index];
+}
+/*******************************************************************************************
+  Event Handlers - Régulation
+*******************************************************************************************/
+PUSH REGUL_CLK
+{
+    REGULATION = 1 - REGULATION; // Toggle
+    REGUL_FB = REGULATION;
+
+    IF (REGULATION = 1)
+    {
+        REGUL_ACTIVE = 1;
+        CalculateConsigne();
+    }
+    ELSE
+    {
+        REGUL_ACTIVE = 0;
+        CONSIGNE = 0;
+    }
+}
+PUSH REGUL_SET
+{
+    REGULATION = 1;
+    REGUL_FB = 1;
+    REGUL_ACTIVE = 1;
+    CalculateConsigne();
+}
+PUSH REGUL_RESET
+{
+    REGULATION = 0;
+    REGUL_FB = 0;
+    CONSIGNE = 0;
+    REGUL_ACTIVE = 0;
+}
+/*******************************************************************************************
+  Event Handlers - Heures et Minutes
+*******************************************************************************************/
+CHANGE HOUR
+{
+    INTEGER index;
+    index = GetLastModifiedArrayIndex();
+
+    IF (HOUR[index] >= 0 && HOUR[index] < 24)
+    {
+        EVENT_HOUR[index] = HOUR[index];
+        EVENT_HOUR_FB[index] = EVENT_HOUR[index];
+    }
+}
+CHANGE MINUTE
+{
+    INTEGER index;
+    index = GetLastModifiedArrayIndex();
+
+    IF (MINUTE[index] >= 0 && MINUTE[index] < 60)
+    {
+        EVENT_MINUTE[index] = MINUTE[index];
+        EVENT_MINUTE_FB[index] = EVENT_MINUTE[index];
+    }
+}
+PUSH HOUR_PLUS
+{
+    INTEGER index;
+    index = GetLastModifiedArrayIndex();
+
+    EVENT_HOUR[index] = EVENT_HOUR[index] + 1;
+    IF (EVENT_HOUR[index] > 23)
+        EVENT_HOUR[index] = 0;
+
+    EVENT_HOUR_FB[index] = EVENT_HOUR[index];
+}
+PUSH HOUR_MINUS
+{
+    INTEGER index;
+    index = GetLastModifiedArrayIndex();
+
+    EVENT_HOUR[index] = EVENT_HOUR[index] - 1;
+    IF (EVENT_HOUR[index] < 0)
+        EVENT_HOUR[index] = 23;
+
+    EVENT_HOUR_FB[index] = EVENT_HOUR[index];
+}
+PUSH MINUTE_PLUS
+{
+    INTEGER index;
+    index = GetLastModifiedArrayIndex();
+
+    EVENT_MINUTE[index] = EVENT_MINUTE[index] + 15;
+    IF (EVENT_MINUTE[index] > 59)
+        EVENT_MINUTE[index] = 0;
+
+    EVENT_MINUTE_FB[index] = EVENT_MINUTE[index];
+}
+PUSH MINUTE_MINUS
+{
+    INTEGER index;
+    index = GetLastModifiedArrayIndex();
+
+    EVENT_MINUTE[index] = EVENT_MINUTE[index] - 15;
+    IF (EVENT_MINUTE[index] < 0)
+        EVENT_MINUTE[index] = 45;
+
+    EVENT_MINUTE_FB[index] = EVENT_MINUTE[index];
+}
+/*******************************************************************************************
+  Event Handlers - Jours de la semaine
+*******************************************************************************************/
+PUSH LUNDI_CLK
+{
+    INTEGER index;
+    index = GetLastModifiedArrayIndex();
+    JOURS[LUNDI][index] = 1 - JOURS[LUNDI][index];
+    LUNDI_FB[index] = JOURS[LUNDI][index];
+}
+PUSH MARDI_CLK
+{
+    INTEGER index;
+    index = GetLastModifiedArrayIndex();
+    JOURS[MARDI][index] = 1 - JOURS[MARDI][index];
+    MARDI_FB[index] = JOURS[MARDI][index];
+}
+PUSH MERCREDI_CLK
+{
+    INTEGER index;
+    index = GetLastModifiedArrayIndex();
+    JOURS[MERCREDI][index] = 1 - JOURS[MERCREDI][index];
+    MERCREDI_FB[index] = JOURS[MERCREDI][index];
+}
+PUSH JEUDI_CLK
+{
+    INTEGER index;
+    index = GetLastModifiedArrayIndex();
+    JOURS[JEUDI][index] = 1 - JOURS[JEUDI][index];
+    JEUDI_FB[index] = JOURS[JEUDI][index];
+}
+PUSH VENDREDI_CLK
+{
+    INTEGER index;
+    index = GetLastModifiedArrayIndex();
+    JOURS[VENDREDI][index] = 1 - JOURS[VENDREDI][index];
+    VENDREDI_FB[index] = JOURS[VENDREDI][index];
+}
+PUSH SAMEDI_CLK
+{
+    INTEGER index;
+    index = GetLastModifiedArrayIndex();
+    JOURS[SAMEDI][index] = 1 - JOURS[SAMEDI][index];
+    SAMEDI_FB[index] = JOURS[SAMEDI][index];
+}
+PUSH DIMANCHE_CLK
+{
+    INTEGER index;
+    index = GetLastModifiedArrayIndex();
+    JOURS[DIMANCHE][index] = 1 - JOURS[DIMANCHE][index];
+    DIMANCHE_FB[index] = JOURS[DIMANCHE][index];
+}
+/*******************************************************************************************
+  Event Handlers - Vérification Schedule (déclenché par OSCILLATOR)
+*******************************************************************************************/
+PUSH CHECK_SCHEDULE_PULSE
+{
+    CheckSchedule();
+}
+/*******************************************************************************************
+  Event Handlers - Fichiers et Démarrage
+*******************************************************************************************/
+PUSH DEMARRAGE_TRIG
+{
+    CalculateConsigne();
+}
+PUSH WRITE_FILE
+{
+    File_Write();
+}
+PUSH READ_FILE
+{
+    File_Read();
+}
+PUSH INIT
+{
+    INTEGER i;
+
+    FOR (i = 1 TO TAILLE)
+    {
+        EVENT_HOUR[i] = 0;
+        EVENT_MINUTE[i] = 0;
+        JOURS[1][i] = 0;
+        JOURS[2][i] = 0;
+        JOURS[3][i] = 0;
+        JOURS[4][i] = 0;
+        JOURS[5][i] = 0;
+        JOURS[6][i] = 0;
+        JOURS[7][i] = 0;
+        TEMP[i] = 0;
+        PLAGE_ACTIF[i] = 0;
+    }
+
+    REGULATION = 0;
+    UpdateAllFeedbacks();
+    TRACE("Initialisation complète");
+}
+PUSH ENABLE
+{
+    ACTIF = 1;
+    TRACE("Scheduler activé");
+}
+RELEASE ENABLE
+{
+    ACTIF = 0;
+    TRACE("Scheduler désactivé");
+}
+/*******************************************************************************************
+  Main Function - Initialisation uniquement
+*******************************************************************************************/
+Function Main()
+{
+    TRACE("=== Démarrage du Scheduler (OSCILLATOR Mode) ===");
+
+    // Initialisation
+    Nom = NOM_FICHIER;
+    ACTIF = 0;
+    REGULATION = 0;
+    LAST_CHECKED_MINUTE = -1;
+
+    TRACE("Nom du fichier: %s", Nom);
+    TRACE("IMPORTANT: Connecter un OSCILLATOR de 1 minute à CHECK_SCHEDULE_PULSE");
+
+    // Chargement de la configuration
+    File_Read();
+
+    // Pas de boucle WHILE - tout est géré par événements!
+    // L'OSCILLATOR déclenche CHECK_SCHEDULE_PULSE toutes les minutes
+}
