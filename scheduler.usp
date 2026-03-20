@@ -358,6 +358,14 @@ FUNCTION File_Read()
         }
 
         // Traitement du contenu
+        // Normalisation : s'assurer que le contenu se termine par \n
+        // pour que la dernière ligne soit traitée même sans \n final
+        IF (LEN(fileContent) > 0)
+        {
+            IF (RIGHT(fileContent, 1) <> "\n")
+                fileContent = fileContent + "\n";
+        }
+
         i = 1;
         WHILE (FIND("\n", fileContent) > 0 && i <= TAILLE)
         {
