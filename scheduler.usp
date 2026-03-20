@@ -330,6 +330,7 @@ FUNCTION File_Write()
     EndFileOperations();
     Disk_Activity_FB = 0;
     CalculateConsigne();
+    UpdateAllFeedbacks();
 }
 FUNCTION File_Read()
 {
