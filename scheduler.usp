@@ -337,6 +337,7 @@ FUNCTION File_Read()
     STRING Nom_Fichier[60];
     STRING fileContent[FILESIZE];
     STRING line[100];
+    STRING _discard[100];
     Disk_Activity_FB = 1;
     Nom_Fichier = "\\mmc\\SCHEDULER_" + Nom + ".csv";
     TRACE("Lecture fichier: %s", Nom_Fichier);
@@ -384,7 +385,7 @@ FUNCTION File_Read()
             IF (i = 1)
                 REGULATION = ATOI(REMOVE(",", line));
             ELSE
-                REMOVE(",", line); // Consommer le champ sans l'appliquer
+                _discard = REMOVE(",", line); // Consommer le champ sans l'appliquer
             PLAGE_ACTIF[i] = ATOI(REMOVE(",", line));
 
             i = i + 1;
