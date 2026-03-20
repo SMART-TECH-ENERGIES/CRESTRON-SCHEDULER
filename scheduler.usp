@@ -604,6 +604,7 @@ PUSH CHECK_SCHEDULE_PULSE
 PUSH DEMARRAGE_TRIG
 {
     CalculateConsigne();
+    UpdateAllFeedbacks();
 }
 PUSH WRITE_FILE
 {
